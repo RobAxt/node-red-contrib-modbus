@@ -216,12 +216,13 @@ describe('Core Server Testing', function () {
         payload: { register: 'coils' },
         bufferData: Buffer.from([1, 2, 3, 4]),
         bufferAddress: 2,
+        bufferBitIndex: 0,
         bufferSplitAddress: 4
       }
       const result = coreServerUnderTest.copyToModbusFlexBuffer(node, msg)
 
       expect(result).to.equal(true)
-      expect(node.coils.slice(2, 6)).to.deep.equal(msg.bufferData)
+      expect(node.coils.readUInt8(2)).to.equal(15)
     })
 
     it('should copy bufferData to registers for input register', () => {
@@ -250,12 +251,14 @@ describe('Core Server Testing', function () {
         payload: { register: 'discrete' },
         bufferData: Buffer.from([1, 2, 3, 4]),
         bufferAddress: 2,
+        bufferBitIndex: 0,
+        bufferBitSplitIndex: 0,
         bufferSplitAddress: 4
       }
       const result = coreServerUnderTest.copyToModbusFlexBuffer(node, msg)
 
       expect(result).to.equal(true)
-      expect(node.coils.slice(4, 8)).to.deep.equal(msg.bufferData)
+      expect(node.coils.readUInt8(4)).to.equal(15)
     })
 
     it('should return false for unknown register', () => {
@@ -379,11 +382,11 @@ describe('Modbus server core function Write  Buffer', () => {
         address: 0
       },
       bufferData: Buffer.from([1, 2, 3, 4]),
-      bufferAddress: 0
+      bufferAddress: 0,
+      bufferBitIndex: 0
     }
-    const copySpyCoil = sinon.spy(msg.bufferData, 'copy')
     coreServerUnderTest.copyToModbusBuffer(node, msg)
-    sinon.assert.calledWith(copySpyCoil, node.modbusServer.coils, 0)
+    assert.strictEqual(node.modbusServer.coils.readUInt8(0), 15)
 
     msg = msg = {
       payload: {
@@ -391,11 +394,12 @@ describe('Modbus server core function Write  Buffer', () => {
         address: 0
       },
       bufferData: Buffer.from([13, 14, 15, 16]),
-      bufferAddress: 0
+      bufferAddress: 0,
+      bufferBitIndex: 0
     }
     const discreteResult = coreServerUnderTest.copyToModbusBuffer(node, msg)
     assert.strictEqual(discreteResult, true)
-    assert.deepStrictEqual(node.modbusServer.discrete.slice(0, 4), Buffer.from([13, 14, 15, 16]))
+    assert.strictEqual(node.modbusServer.discrete.readUInt8(0), 15)
     node = {
       modbusServer: {}
     }
@@ -412,15 +416,11 @@ describe('Modbus server core function Write  Buffer', () => {
 
     node = {
       modbusServer: {
-        discrete: {
-          writeUInt8: sinon.spy()
-        },
+        discrete: Buffer.alloc(10),
         holding: {
           writeUInt16BE: sinon.spy()
         },
-        coils: {
-          writeUInt8: sinon.spy()
-        }
+        coils: Buffer.alloc(10)
       }
     }
     msg = {
@@ -429,10 +429,11 @@ describe('Modbus server core function Write  Buffer', () => {
         address: 1
       },
       bufferPayload: 255,
-      bufferAddress: 2
+      bufferAddress: 2,
+      bufferBitIndex: 1
     }
     coreServerUnderTest.writeToModbusBuffer(node, msg)
-    sinon.assert.calledWith(node.modbusServer.discrete.writeUInt8, 255, 2)
+    assert.strictEqual(node.modbusServer.discrete.readUInt8(2), 2)
     msg = {
       payload: {
         register: 'holding'
@@ -447,11 +448,12 @@ describe('Modbus server core function Write  Buffer', () => {
         register: 'coils'
       },
       bufferPayload: Buffer.from([0x01]),
-      bufferAddress: 0
+      bufferAddress: 0,
+      bufferBitIndex: 0
     }
     coreServerUnderTest.writeToModbusBuffer(node, msg)
 
-    sinon.assert.calledWith(node.modbusServer.coils.writeUInt8, 1, 0)
+    assert.strictEqual(node.modbusServer.coils.readUInt8(0), 1)
     msg = { payload: { register: 'discrete' } }
     node = { error: sinon.spy() }
     coreServerUnderTest.writeToServerMemory(node, msg)

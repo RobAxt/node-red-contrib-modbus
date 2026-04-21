@@ -14,7 +14,6 @@ const _ = require('underscore')
 var de = de || { biancoroyal: { modbus: { core: { server: { } } } } } // eslint-disable-line no-use-before-define
 de.biancoroyal.modbus.core.server.internalDebug = de.biancoroyal.modbus.core.server.internalDebug || require('debug')('contribModbus:core:server') // eslint-disable-line no-use-before-define
 
-de.biancoroyal.modbus.core.server.bufferFactor = 8
 de.biancoroyal.modbus.core.server.memoryTypes = ['holding', 'coils', 'input', 'discrete']
 de.biancoroyal.modbus.core.server.memoryUint16Types = ['holding', 'input']
 de.biancoroyal.modbus.core.server.memoryUint8Types = ['coils', 'discrete']
@@ -44,15 +43,31 @@ de.biancoroyal.modbus.core.server.copyToModbusFlexBuffer = function (node, msg) 
     case 'holding':
       msg.bufferData.copy(node.registers, msg.bufferSplitAddress)
       break
-    case 'coils':
-      msg.bufferData.copy(node.coils, msg.bufferAddress)
+    case 'coils': {
+      const startBit = msg.bufferAddress * 8 + msg.bufferBitIndex
+      Array.from(msg.bufferData).forEach(function (val, i) {
+        const globalBit = startBit + i
+        const byteIdx = Math.floor(globalBit / 8)
+        const bitIdx = globalBit % 8
+        const cur = node.coils.readUInt8(byteIdx)
+        node.coils.writeUInt8(val ? (cur | (1 << bitIdx)) : (cur & ~(1 << bitIdx)), byteIdx)
+      })
       break
+    }
     case 'input':
       msg.bufferData.copy(node.registers, msg.bufferAddress)
       break
-    case 'discrete':
-      msg.bufferData.copy(node.coils, msg.bufferSplitAddress)
+    case 'discrete': {
+      const startBit = msg.bufferSplitAddress * 8 + msg.bufferBitSplitIndex
+      Array.from(msg.bufferData).forEach(function (val, i) {
+        const globalBit = startBit + i
+        const byteIdx = Math.floor(globalBit / 8)
+        const bitIdx = globalBit % 8
+        const cur = node.coils.readUInt8(byteIdx)
+        node.coils.writeUInt8(val ? (cur | (1 << bitIdx)) : (cur & ~(1 << bitIdx)), byteIdx)
+      })
       break
+    }
     default:
       return false
   }
@@ -60,19 +75,24 @@ de.biancoroyal.modbus.core.server.copyToModbusFlexBuffer = function (node, msg) 
 }
 
 de.biancoroyal.modbus.core.server.writeToModbusFlexBuffer = function (node, msg) {
+  const rawVal = (Buffer.isBuffer(msg.bufferPayload)) ? msg.bufferPayload.readUInt8(0) : msg.bufferPayload
   switch (msg.payload.register) {
     case 'holding':
       node.registers.writeUInt16BE((Buffer.isBuffer(msg.bufferPayload)) ? msg.bufferPayload.readUInt16BE(0) : msg.bufferPayload, msg.bufferSplitAddress)
       break
-    case 'coils':
-      node.coils.writeUInt8((Buffer.isBuffer(msg.bufferPayload)) ? msg.bufferPayload.readUInt8(0) : msg.bufferPayload, msg.bufferAddress)
+    case 'coils': {
+      const cur = node.coils.readUInt8(msg.bufferAddress)
+      node.coils.writeUInt8(rawVal ? (cur | (1 << msg.bufferBitIndex)) : (cur & ~(1 << msg.bufferBitIndex)), msg.bufferAddress)
       break
+    }
     case 'input':
       node.registers.writeUInt16BE((Buffer.isBuffer(msg.bufferPayload)) ? msg.bufferPayload.readUInt16BE(0) : msg.bufferPayload, msg.bufferAddress)
       break
-    case 'discrete':
-      node.coils.writeUInt8((Buffer.isBuffer(msg.bufferPayload)) ? msg.bufferPayload.readUInt8(0) : msg.bufferPayload, msg.bufferSplitAddress)
+    case 'discrete': {
+      const cur = node.coils.readUInt8(msg.bufferSplitAddress)
+      node.coils.writeUInt8(rawVal ? (cur | (1 << msg.bufferBitSplitIndex)) : (cur & ~(1 << msg.bufferBitSplitIndex)), msg.bufferSplitAddress)
       break
+    }
     default:
       return false
   }
@@ -81,8 +101,19 @@ de.biancoroyal.modbus.core.server.writeToModbusFlexBuffer = function (node, msg)
 
 de.biancoroyal.modbus.core.server.writeModbusFlexServerMemory = function (node, msg) {
   const coreServer = de.biancoroyal.modbus.core.server
-  msg.bufferSplitAddress = (parseInt(msg.payload.address) + parseInt(node.splitAddress)) * coreServer.bufferFactor
-  msg.bufferAddress = parseInt(msg.payload.address) * coreServer.bufferFactor
+  const address = parseInt(msg.payload.address)
+  const splitAddress = parseInt(node.splitAddress)
+  if (['holding', 'input'].includes(msg.payload.register)) {
+    msg.bufferSplitAddress = (address + splitAddress) * 2
+    msg.bufferAddress = address * 2
+    msg.bufferBitIndex = 0
+    msg.bufferBitSplitIndex = 0
+  } else {
+    msg.bufferSplitAddress = Math.floor((address + splitAddress) / 8)
+    msg.bufferAddress = Math.floor(address / 8)
+    msg.bufferBitIndex = address % 8
+    msg.bufferBitSplitIndex = (address + splitAddress) % 8
+  }
 
   if (coreServer.convertInputForBufferWrite(msg)) {
     return coreServer.copyToModbusFlexBuffer(node, msg)
@@ -111,15 +142,31 @@ de.biancoroyal.modbus.core.server.copyToModbusBuffer = function (node, msg) {
     case 'holding':
       msg.bufferData.copy(node.modbusServer.holding, msg.bufferAddress)
       break
-    case 'coils':
-      msg.bufferData.copy(node.modbusServer.coils, msg.bufferAddress)
+    case 'coils': {
+      const startBit = msg.bufferAddress * 8 + msg.bufferBitIndex
+      Array.from(msg.bufferData).forEach(function (val, i) {
+        const globalBit = startBit + i
+        const byteIdx = Math.floor(globalBit / 8)
+        const bitIdx = globalBit % 8
+        const cur = node.modbusServer.coils.readUInt8(byteIdx)
+        node.modbusServer.coils.writeUInt8(val ? (cur | (1 << bitIdx)) : (cur & ~(1 << bitIdx)), byteIdx)
+      })
       break
+    }
     case 'input':
       msg.bufferData.copy(node.modbusServer.input, msg.bufferAddress)
       break
-    case 'discrete':
-      msg.bufferData.copy(node.modbusServer.discrete, msg.bufferAddress)
+    case 'discrete': {
+      const startBit = msg.bufferAddress * 8 + msg.bufferBitIndex
+      Array.from(msg.bufferData).forEach(function (val, i) {
+        const globalBit = startBit + i
+        const byteIdx = Math.floor(globalBit / 8)
+        const bitIdx = globalBit % 8
+        const cur = node.modbusServer.discrete.readUInt8(byteIdx)
+        node.modbusServer.discrete.writeUInt8(val ? (cur | (1 << bitIdx)) : (cur & ~(1 << bitIdx)), byteIdx)
+      })
       break
+    }
     default:
       return false
   }
@@ -127,19 +174,24 @@ de.biancoroyal.modbus.core.server.copyToModbusBuffer = function (node, msg) {
 }
 
 de.biancoroyal.modbus.core.server.writeToModbusBuffer = function (node, msg) {
+  const rawVal = (Buffer.isBuffer(msg.bufferPayload)) ? msg.bufferPayload.readUInt8(0) : msg.bufferPayload
   switch (msg.payload.register) {
     case 'holding':
       node.modbusServer.holding.writeUInt16BE((Buffer.isBuffer(msg.bufferPayload)) ? msg.bufferPayload.readUInt16BE(0) : msg.bufferPayload, msg.bufferAddress)
       break
-    case 'coils':
-      node.modbusServer.coils.writeUInt8((Buffer.isBuffer(msg.bufferPayload)) ? msg.bufferPayload.readUInt8(0) : msg.bufferPayload, msg.bufferAddress)
+    case 'coils': {
+      const cur = node.modbusServer.coils.readUInt8(msg.bufferAddress)
+      node.modbusServer.coils.writeUInt8(rawVal ? (cur | (1 << msg.bufferBitIndex)) : (cur & ~(1 << msg.bufferBitIndex)), msg.bufferAddress)
       break
+    }
     case 'input':
       node.modbusServer.input.writeUInt16BE((Buffer.isBuffer(msg.bufferPayload)) ? msg.bufferPayload.readUInt16BE(0) : msg.bufferPayload, msg.bufferAddress)
       break
-    case 'discrete':
-      node.modbusServer.discrete.writeUInt8((Buffer.isBuffer(msg.bufferPayload)) ? msg.bufferPayload.readUInt8(0) : msg.bufferPayload, msg.bufferAddress)
+    case 'discrete': {
+      const cur = node.modbusServer.discrete.readUInt8(msg.bufferAddress)
+      node.modbusServer.discrete.writeUInt8(rawVal ? (cur | (1 << msg.bufferBitIndex)) : (cur & ~(1 << msg.bufferBitIndex)), msg.bufferAddress)
       break
+    }
     default:
       return false
   }
@@ -148,7 +200,14 @@ de.biancoroyal.modbus.core.server.writeToModbusBuffer = function (node, msg) {
 
 de.biancoroyal.modbus.core.server.writeModbusServerMemory = function (node, msg) {
   const coreServer = de.biancoroyal.modbus.core.server
-  msg.bufferAddress = parseInt(msg.payload.address) * coreServer.bufferFactor
+  const address = parseInt(msg.payload.address)
+  if (['holding', 'input'].includes(msg.payload.register)) {
+    msg.bufferAddress = address * 2
+    msg.bufferBitIndex = 0
+  } else {
+    msg.bufferAddress = Math.floor(address / 8)
+    msg.bufferBitIndex = address % 8
+  }
 
   if (coreServer.convertInputForBufferWrite(msg)) {
     return coreServer.copyToModbusBuffer(node, msg)

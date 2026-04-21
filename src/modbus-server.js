@@ -24,8 +24,6 @@ module.exports = function (RED) {
   function ModbusServer (config) {
     RED.nodes.createNode(this, config)
 
-    const bufferFactor = 8
-
     this.name = config.name
     this.logEnabled = config.logEnabled
     this.hostname = config.hostname || '0.0.0.0'
@@ -33,10 +31,10 @@ module.exports = function (RED) {
     this.responseDelay = parseInt(config.responseDelay) || 1
     this.delayUnit = config.delayUnit
     this.showStatusActivities = config.showStatusActivities || false
-    this.coilsBufferSize = parseInt(config.coilsBufferSize * bufferFactor)
-    this.holdingBufferSize = parseInt(config.holdingBufferSize * bufferFactor)
-    this.inputBufferSize = parseInt(config.inputBufferSize * bufferFactor)
-    this.discreteBufferSize = parseInt(config.discreteBufferSize * bufferFactor)
+    this.holdingBufferSize = parseInt(config.holdingBufferSize) * 2
+    this.inputBufferSize = parseInt(config.inputBufferSize) * 2
+    this.coilsBufferSize = Math.ceil(parseInt(config.coilsBufferSize) / 8)
+    this.discreteBufferSize = Math.ceil(parseInt(config.discreteBufferSize) / 8)
 
     this.showErrors = config.showErrors
     this.internalDebugLog = internalDebugLog
